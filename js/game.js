@@ -420,10 +420,10 @@ function onKeyDown(event) {
     if (!gameStarted) return;
     
     switch (event.code) {
-        case 'KeyW':
+        case 'KeyS':
             moveForward = true;
             break;
-        case 'KeyS':
+        case 'KeyW':
             moveBackward = true;
             break;
         case 'KeyA':
@@ -448,10 +448,10 @@ function onKeyDown(event) {
 
 function onKeyUp(event) {
     switch (event.code) {
-        case 'KeyW':
+        case 'KeyS':
             moveForward = false;
             break;
-        case 'KeyS':
+        case 'KeyW':
             moveBackward = false;
             break;
         case 'KeyA':
