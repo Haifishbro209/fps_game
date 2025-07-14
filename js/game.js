@@ -150,11 +150,28 @@ function createHouse() {
     firstFloor.receiveShadow = true;
     houseGroup.add(firstFloor);
     
-    // Add collision box for first floor
+    // Add collision box for first floor - but with a doorway
+    // Split the first floor collision into multiple boxes to create a doorway
     collidableObjects.push({
-        position: { x: 15, y: 1.5, z: 15 },
-        size: { x: 8, y: 3, z: 8 }
+        position: { x: 13, y: 1.5, z: 15 }, // Left part of house
+        size: { x: 4, y: 3, z: 8 }
     });
+    collidableObjects.push({
+        position: { x: 17, y: 1.5, z: 15 }, // Right part of house  
+        size: { x: 4, y: 3, z: 8 }
+    });
+    collidableObjects.push({
+        position: { x: 15, y: 1.5, z: 13 }, // Back part of house
+        size: { x: 2, y: 3, z: 4 }
+    });
+    // Add door collision when closed - will be managed by door state
+    const doorCollision = {
+        position: { x: 15, y: 1.1, z: 19.1 },
+        size: { x: 1.8, y: 2.2, z: 0.1 },
+        isDoor: true
+    };
+    collidableObjects.push(doorCollision);
+    world.doorCollision = doorCollision;
 
     // Second floor
     const secondFloorGeometry = new THREE.BoxGeometry(8, 3, 8);
@@ -209,16 +226,60 @@ function createHouse() {
     rightWindow.rotation.y = -Math.PI / 2;
     houseGroup.add(rightWindow);
 
-    // Stairs to second floor (simple ramp)
-    const stairsGeometry = new THREE.BoxGeometry(2, 0.1, 3);
-    const stairsMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+    // Door frame (visual indication of entrance)
+    const doorFrameGeometry = new THREE.BoxGeometry(2.2, 2.5, 0.3);
+    const doorFrameMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+    const doorFrame = new THREE.Mesh(doorFrameGeometry, doorFrameMaterial);
+    doorFrame.position.set(15, 1.25, 19.15); // Front of house
+    doorFrame.castShadow = true;
+    houseGroup.add(doorFrame);
     
-    for (let i = 0; i < 10; i++) {
-        const step = new THREE.Mesh(stairsGeometry, stairsMaterial);
-        step.position.set(11, 0.1 + i * 0.3, 12 + i * 0.3);
-        step.castShadow = true;
-        houseGroup.add(step);
+    // Actual door that can be opened/closed
+    const doorGeometry = new THREE.BoxGeometry(1.8, 2.2, 0.1);
+    const doorMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+    const doorMesh = new THREE.Mesh(doorGeometry, doorMaterial);
+    doorMesh.position.set(15, 1.1, 19.1);
+    doorMesh.castShadow = true;
+    doorMesh.userData = { 
+        isDoor: true, 
+        isOpen: false, 
+        originalPosition: { x: 15, y: 1.1, z: 19.1 },
+        openPosition: { x: 16.5, y: 1.1, z: 19.1 }
+    };
+    houseGroup.add(doorMesh);
+    world.door = doorMesh;
+
+    // Internal ladder leading to second floor
+    const internalLadderGroup = new THREE.Group();
+    
+    // Ladder rails (vertical supports) - positioned inside house
+    const internalRailGeometry = new THREE.BoxGeometry(0.1, 4.5, 0.1);
+    const internalRailMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+    
+    const internalLeftRail = new THREE.Mesh(internalRailGeometry, internalRailMaterial);
+    internalLeftRail.position.set(12.5, 2.25, 17);
+    internalLeftRail.castShadow = true;
+    internalLadderGroup.add(internalLeftRail);
+    
+    const internalRightRail = new THREE.Mesh(internalRailGeometry, internalRailMaterial);
+    internalRightRail.position.set(13.2, 2.25, 17);
+    internalRightRail.castShadow = true;
+    internalLadderGroup.add(internalRightRail);
+    
+    // Ladder rungs (horizontal steps)
+    const rungGeometry = new THREE.BoxGeometry(0.8, 0.05, 0.1);
+    const rungMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+    
+    for (let i = 0; i < 12; i++) {
+        const rung = new THREE.Mesh(rungGeometry, rungMaterial);
+        rung.position.set(12.85, 0.5 + i * 0.35, 17);
+        rung.castShadow = true;
+        internalLadderGroup.add(rung);
     }
+    
+    // Add internal ladder to house group
+    houseGroup.add(internalLadderGroup);
+    world.ladder = internalLadderGroup;
 
     scene.add(houseGroup);
     world.house = houseGroup;
@@ -269,15 +330,38 @@ function createTrees() {
 
 function createCoverWalls() {
     const wallPositions = [
-        { x: 0, z: -10, width: 6, height: 2 },
-        { x: -15, z: 0, width: 2, height: 2 },
-        { x: 10, z: -5, width: 4, height: 2 },
-        { x: -5, z: 20, width: 3, height: 2 }
+        // Original walls - made higher
+        { x: 0, z: -10, width: 6, height: 3, depth: 0.8 },
+        { x: -15, z: 0, width: 3, height: 3, depth: 0.8 },
+        { x: 10, z: -5, width: 4, height: 3, depth: 0.8 },
+        { x: -5, z: 20, width: 4, height: 3, depth: 0.8 },
+        
+        // Additional cover walls for better tactical gameplay
+        { x: -25, z: -15, width: 5, height: 3.5, depth: 0.8 },
+        { x: 25, z: 10, width: 3, height: 3.5, depth: 0.8 },
+        { x: -8, z: -20, width: 4, height: 3, depth: 0.8 },
+        { x: 18, z: -18, width: 6, height: 3, depth: 0.8 },
+        { x: -20, z: 15, width: 4, height: 3.5, depth: 0.8 },
+        { x: 8, z: 25, width: 5, height: 3, depth: 0.8 },
+        
+        // L-shaped corner covers
+        { x: -12, z: -12, width: 2, height: 3.5, depth: 4 },
+        { x: 22, z: 22, width: 2, height: 3.5, depth: 4 },
+        { x: -22, z: 22, width: 4, height: 3.5, depth: 2 },
+        { x: 12, z: -12, width: 4, height: 3.5, depth: 2 },
+        
+        // Some connecting walls for more complex cover
+        { x: 5, z: 12, width: 8, height: 2.5, depth: 0.6 },
+        { x: -18, z: -8, width: 6, height: 2.8, depth: 0.6 }
     ];
 
     wallPositions.forEach((wall, index) => {
-        const wallGeometry = new THREE.BoxGeometry(wall.width, wall.height, 0.5);
-        const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x696969 });
+        const wallGeometry = new THREE.BoxGeometry(wall.width, wall.height, wall.depth);
+        const wallMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x696969,
+            // Add some variation in color
+            ...(Math.random() > 0.5 && { color: 0x808080 })
+        });
         const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
         wallMesh.position.set(wall.x, wall.height / 2, wall.z);
         wallMesh.castShadow = true;
@@ -288,7 +372,7 @@ function createCoverWalls() {
         // Add collision box for wall
         collidableObjects.push({
             position: { x: wall.x, y: wall.height / 2, z: wall.z },
-            size: { x: wall.width, y: wall.height, z: 0.5 }
+            size: { x: wall.width, y: wall.height, z: wall.depth }
         });
     });
 }
@@ -336,10 +420,10 @@ function onKeyDown(event) {
     if (!gameStarted) return;
     
     switch (event.code) {
-        case 'KeyS':
+        case 'KeyW':
             moveForward = true;
             break;
-        case 'KeyW':
+        case 'KeyS':
             moveBackward = true;
             break;
         case 'KeyA':
@@ -353,15 +437,21 @@ function onKeyDown(event) {
                 socket.emit('reload');
             }
             break;
+        case 'KeyE':
+            // Door interaction
+            if (checkDoorProximity()) {
+                toggleDoor();
+            }
+            break;
     }
 }
 
 function onKeyUp(event) {
     switch (event.code) {
-        case 'KeyS':
+        case 'KeyW':
             moveForward = false;
             break;
-        case 'KeyW':
+        case 'KeyS':
             moveBackward = false;
             break;
         case 'KeyA':
@@ -433,6 +523,11 @@ function shoot() {
 // Collision detection function
 function checkCollision(position, radius = 0.5) {
     for (const obj of collidableObjects) {
+        // Skip door collision if door is open
+        if (obj.isDoor && world.door && world.door.userData.isOpen) {
+            continue;
+        }
+        
         const dx = Math.abs(position.x - obj.position.x);
         const dz = Math.abs(position.z - obj.position.z);
         const dy = Math.abs(position.y - obj.position.y);
@@ -445,6 +540,47 @@ function checkCollision(position, radius = 0.5) {
         }
     }
     return false;
+}
+
+// Door interaction function
+function toggleDoor() {
+    const door = world.door;
+    if (!door) return;
+    
+    const userData = door.userData;
+    if (userData.isOpen) {
+        // Close door
+        door.position.set(
+            userData.originalPosition.x,
+            userData.originalPosition.y,
+            userData.originalPosition.z
+        );
+        door.rotation.y = 0;
+        userData.isOpen = false;
+    } else {
+        // Open door (slide to the side)
+        door.position.set(
+            userData.openPosition.x,
+            userData.openPosition.y,
+            userData.openPosition.z
+        );
+        door.rotation.y = Math.PI / 2;
+        userData.isOpen = true;
+    }
+}
+
+// Check if player is near door for interaction
+function checkDoorProximity() {
+    if (!world.door) return false;
+    
+    const doorPos = world.door.position;
+    const playerPos = camera.position;
+    const distance = Math.sqrt(
+        Math.pow(playerPos.x - doorPos.x, 2) +
+        Math.pow(playerPos.z - doorPos.z, 2)
+    );
+    
+    return distance < 3; // Within 3 units of door
 }
 
 function updateMovement(deltaTime) {
