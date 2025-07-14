@@ -244,7 +244,8 @@ setInterval(() => {
                     isHeadshot: isHeadshot,
                     health: player.health,
                     killed: killed,
-                    shooter: bullet.playerId
+                    shooter: bullet.playerId,
+                    hitPosition: { x: player.x, y: player.y, z: player.z }
                 });
 
                 // Remove bullet

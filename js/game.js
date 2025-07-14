@@ -21,8 +21,13 @@ let moveBackward = false;
 let moveLeft = false;
 let moveRight = false;
 let velocity = new THREE.Vector3();
-const MOVE_SPEED = 5; // Reduced from 10 to 5
+const MOVE_SPEED = 2.5; // Further reduced from 5 to 2.5
 const WORLD_SIZE = 50;
+
+// Camera rotation variables for Minecraft-like movement
+let yaw = 0; // Horizontal rotation
+let pitch = 0; // Vertical rotation
+const maxPitch = Math.PI / 2 - 0.01; // Prevent looking too far up/down
 
 // DOM elements
 const ammoCounter = document.getElementById('ammoCount');
@@ -41,6 +46,11 @@ function init() {
     // Create camera
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, 1.8, 0);
+    
+    // Initialize camera rotation for Minecraft-style movement
+    camera.rotation.order = 'YXZ';
+    yaw = 0;
+    pitch = 0;
 
     // Create renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -366,13 +376,21 @@ function onKeyUp(event) {
 function onMouseMove(event) {
     if (!isPointerLocked) return;
     
-    camera.rotation.y -= event.movementX * 0.002;
-    camera.rotation.x -= event.movementY * 0.002;
-    camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+    // Minecraft-style camera movement
+    const sensitivity = 0.002;
     
-    // Prevent camera from tilting/rolling - keep it level
-    camera.rotation.z = 0;
-    camera.up.set(0, 1, 0);
+    // Update yaw (horizontal) and pitch (vertical) separately
+    yaw -= event.movementX * sensitivity;
+    pitch -= event.movementY * sensitivity;
+    
+    // Clamp pitch to prevent over-rotation
+    pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+    
+    // Apply rotations in the correct order (Y then X, no Z)
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+    camera.rotation.z = 0; // Always keep level
 }
 
 function onMouseDown(event) {
@@ -442,17 +460,21 @@ function updateMovement(deltaTime) {
     if (moveLeft) velocity.x -= moveSpeed;
     if (moveRight) velocity.x += moveSpeed;
     
-    // Apply movement relative to camera direction
-    const direction = new THREE.Vector3();
-    camera.getWorldDirection(direction);
-    direction.y = 0;
-    direction.normalize();
+    // Minecraft-style movement: forward/backward based on yaw, strafe left/right
+    const forward = new THREE.Vector3(
+        Math.sin(yaw),
+        0,
+        Math.cos(yaw)
+    );
     
-    const right = new THREE.Vector3();
-    right.crossVectors(direction, camera.up).normalize();
+    const right = new THREE.Vector3(
+        Math.cos(yaw),
+        0,
+        -Math.sin(yaw)
+    );
     
     const moveVector = new THREE.Vector3();
-    moveVector.addScaledVector(direction, -velocity.z);
+    moveVector.addScaledVector(forward, -velocity.z);
     moveVector.addScaledVector(right, velocity.x);
     
     // Check collision before moving
@@ -469,7 +491,7 @@ function updateMovement(deltaTime) {
                 x: camera.position.x,
                 y: camera.position.y,
                 z: camera.position.z,
-                rotationY: camera.rotation.y
+                rotationY: yaw
             });
         }
     }
@@ -517,9 +539,42 @@ function connectToServer() {
     
     socket.on('playerHit', (data) => {
         console.log('Player hit:', data);
+        
         if (data.playerId === socket.id) {
+            // I got hit - show red flash and update health
             playerHealth = data.health;
             updateHealthBar();
+            showHitFlash();
+        } else if (data.shooter === socket.id) {
+            // I shot someone - show damage indicator
+            const hitPlayer = players.get(data.playerId);
+            if (hitPlayer) {
+                const hitPosition = hitPlayer.position.clone();
+                hitPosition.y += 1; // Show indicator above player
+                showDamageIndicator(data.damage, hitPosition);
+            }
+        }
+        
+        // Flash the hit player red for everyone to see
+        const hitPlayerMesh = players.get(data.playerId);
+        if (hitPlayerMesh && data.playerId !== socket.id) {
+            // Save original colors
+            const originalColors = [];
+            hitPlayerMesh.children.forEach((child, index) => {
+                if (child.material && child.material.color) {
+                    originalColors[index] = child.material.color.clone();
+                    child.material.color.setHex(0xff0000); // Red
+                }
+            });
+            
+            // Restore original colors after flash
+            setTimeout(() => {
+                hitPlayerMesh.children.forEach((child, index) => {
+                    if (child.material && originalColors[index]) {
+                        child.material.color.copy(originalColors[index]);
+                    }
+                });
+            }, 200);
         }
     });
     
@@ -692,6 +747,46 @@ function updateAmmoDisplay() {
 function updateHealthBar() {
     const healthPercent = (playerHealth / 100) * 100;
     healthFill.style.width = `${healthPercent}%`;
+}
+
+// Show damage indicator when hitting someone
+function showDamageIndicator(damage, position) {
+    const indicator = document.createElement('div');
+    indicator.className = 'damage-indicator';
+    indicator.textContent = `-${damage}`;
+    
+    // Convert 3D position to screen coordinates
+    const vector = new THREE.Vector3(position.x, position.y, position.z);
+    vector.project(camera);
+    
+    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
+    
+    indicator.style.left = x + 'px';
+    indicator.style.top = y + 'px';
+    
+    document.body.appendChild(indicator);
+    
+    // Remove after animation
+    setTimeout(() => {
+        if (indicator.parentNode) {
+            indicator.parentNode.removeChild(indicator);
+        }
+    }, 1500);
+}
+
+// Show hit flash when getting hit
+function showHitFlash() {
+    const flash = document.createElement('div');
+    flash.className = 'hit-flash';
+    document.body.appendChild(flash);
+    
+    // Remove after animation
+    setTimeout(() => {
+        if (flash.parentNode) {
+            flash.parentNode.removeChild(flash);
+        }
+    }, 300);
 }
 
 // Animation loop
