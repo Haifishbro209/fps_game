@@ -4,6 +4,7 @@ let socket;
 let players = new Map();
 let bullets = new Map();
 let world = {};
+let collidableObjects = []; // Array to store collidable objects
 let gameStarted = false;
 let isPointerLocked = false;
 
@@ -20,7 +21,7 @@ let moveBackward = false;
 let moveLeft = false;
 let moveRight = false;
 let velocity = new THREE.Vector3();
-const MOVE_SPEED = 10;
+const MOVE_SPEED = 5; // Reduced from 10 to 5
 const WORLD_SIZE = 50;
 
 // DOM elements
@@ -138,6 +139,12 @@ function createHouse() {
     firstFloor.castShadow = true;
     firstFloor.receiveShadow = true;
     houseGroup.add(firstFloor);
+    
+    // Add collision box for first floor
+    collidableObjects.push({
+        position: { x: 15, y: 1.5, z: 15 },
+        size: { x: 8, y: 3, z: 8 }
+    });
 
     // Second floor
     const secondFloorGeometry = new THREE.BoxGeometry(8, 3, 8);
@@ -146,6 +153,12 @@ function createHouse() {
     secondFloor.castShadow = true;
     secondFloor.receiveShadow = true;
     houseGroup.add(secondFloor);
+    
+    // Add collision box for second floor
+    collidableObjects.push({
+        position: { x: 15, y: 4.5, z: 15 },
+        size: { x: 8, y: 3, z: 8 }
+    });
 
     // Roof
     const roofGeometry = new THREE.ConeGeometry(6, 2, 4);
@@ -235,6 +248,12 @@ function createTrees() {
         treeGroup.position.set(pos.x, 0, pos.z);
         scene.add(treeGroup);
         world[`tree_${index}`] = treeGroup;
+        
+        // Add collision box for tree trunk
+        collidableObjects.push({
+            position: { x: pos.x, y: 2, z: pos.z },
+            size: { x: 1, y: 4, z: 1 }
+        });
     });
 }
 
@@ -255,6 +274,12 @@ function createCoverWalls() {
         wallMesh.receiveShadow = true;
         scene.add(wallMesh);
         world[`cover_${index}`] = wallMesh;
+        
+        // Add collision box for wall
+        collidableObjects.push({
+            position: { x: wall.x, y: wall.height / 2, z: wall.z },
+            size: { x: wall.width, y: wall.height, z: 0.5 }
+        });
     });
 }
 
@@ -344,6 +369,10 @@ function onMouseMove(event) {
     camera.rotation.y -= event.movementX * 0.002;
     camera.rotation.x -= event.movementY * 0.002;
     camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+    
+    // Prevent camera from tilting/rolling - keep it level
+    camera.rotation.z = 0;
+    camera.up.set(0, 1, 0);
 }
 
 function onMouseDown(event) {
@@ -383,6 +412,23 @@ function shoot() {
     setTimeout(() => { canShoot = true; }, 100);
 }
 
+// Collision detection function
+function checkCollision(position, radius = 0.5) {
+    for (const obj of collidableObjects) {
+        const dx = Math.abs(position.x - obj.position.x);
+        const dz = Math.abs(position.z - obj.position.z);
+        const dy = Math.abs(position.y - obj.position.y);
+        
+        // Check if player is colliding with object (simple box collision)
+        if (dx < (obj.size.x / 2 + radius) && 
+            dz < (obj.size.z / 2 + radius) && 
+            dy < (obj.size.y / 2 + 0.9)) { // Player height is about 1.8
+            return true;
+        }
+    }
+    return false;
+}
+
 function updateMovement(deltaTime) {
     if (!gameStarted) return;
     
@@ -409,19 +455,23 @@ function updateMovement(deltaTime) {
     moveVector.addScaledVector(direction, -velocity.z);
     moveVector.addScaledVector(right, velocity.x);
     
-    // Apply movement with boundary checking
+    // Check collision before moving
     const newPosition = camera.position.clone().add(moveVector);
     
+    // World boundary check
     if (Math.abs(newPosition.x) < WORLD_SIZE - 1 && Math.abs(newPosition.z) < WORLD_SIZE - 1) {
-        camera.position.add(moveVector);
-        
-        // Send position to server
-        socket.emit('playerMove', {
-            x: camera.position.x,
-            y: camera.position.y,
-            z: camera.position.z,
-            rotationY: camera.rotation.y
-        });
+        // Collision check
+        if (!checkCollision(newPosition)) {
+            camera.position.add(moveVector);
+            
+            // Send position to server
+            socket.emit('playerMove', {
+                x: camera.position.x,
+                y: camera.position.y,
+                z: camera.position.z,
+                rotationY: camera.rotation.y
+            });
+        }
     }
 }
 
@@ -504,31 +554,104 @@ function connectToServer() {
 function addPlayer(player) {
     if (players.has(player.id)) return;
     
-    // Create player representation
-    const geometry = new THREE.CapsuleGeometry(0.5, 1.5, 4, 8);
-    const material = new THREE.MeshLambertMaterial({ color: Math.random() * 0xffffff });
-    const playerMesh = new THREE.Mesh(geometry, material);
+    // Create player representation - a more visible character model
+    const playerGroup = new THREE.Group();
     
-    playerMesh.position.set(player.x, player.y, player.z);
-    playerMesh.castShadow = true;
+    // Body (capsule-like shape using cylinder + spheres)
+    const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1.2);
+    const bodyMaterial = new THREE.MeshLambertMaterial({ 
+        color: Math.random() * 0xffffff 
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.position.y = 0.6;
+    body.castShadow = true;
+    playerGroup.add(body);
     
-    scene.add(playerMesh);
-    players.set(player.id, playerMesh);
+    // Head
+    const headGeometry = new THREE.SphereGeometry(0.2);
+    const headMaterial = new THREE.MeshLambertMaterial({ 
+        color: 0xFFDBAE // Skin color
+    });
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    head.position.y = 1.4;
+    head.castShadow = true;
+    playerGroup.add(head);
+    
+    // Arms
+    const armGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.8);
+    const armMaterial = new THREE.MeshLambertMaterial({ color: bodyMaterial.color });
+    
+    const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+    leftArm.position.set(-0.4, 0.6, 0);
+    leftArm.castShadow = true;
+    playerGroup.add(leftArm);
+    
+    const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+    rightArm.position.set(0.4, 0.6, 0);
+    rightArm.castShadow = true;
+    playerGroup.add(rightArm);
+    
+    // Legs
+    const legGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.8);
+    const legMaterial = new THREE.MeshLambertMaterial({ color: 0x000080 }); // Dark blue
+    
+    const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+    leftLeg.position.set(-0.15, -0.4, 0);
+    leftLeg.castShadow = true;
+    playerGroup.add(leftLeg);
+    
+    const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+    rightLeg.position.set(0.15, -0.4, 0);
+    rightLeg.castShadow = true;
+    playerGroup.add(rightLeg);
+    
+    // Name tag (optional)
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 64;
+    context.fillStyle = 'rgba(0,0,0,0.7)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'white';
+    context.font = '20px Arial';
+    context.textAlign = 'center';
+    context.fillText('Player', canvas.width / 2, 35);
+    
+    const nameTexture = new THREE.CanvasTexture(canvas);
+    const nameMaterial = new THREE.MeshBasicMaterial({ 
+        map: nameTexture, 
+        transparent: true 
+    });
+    const nameGeometry = new THREE.PlaneGeometry(1, 0.25);
+    const nameTag = new THREE.Mesh(nameGeometry, nameMaterial);
+    nameTag.position.y = 2;
+    playerGroup.add(nameTag);
+    
+    playerGroup.position.set(player.x, player.y - 0.9, player.z); // Adjust for ground level
+    
+    scene.add(playerGroup);
+    players.set(player.id, playerGroup);
 }
 
 function removePlayer(playerId) {
-    const playerMesh = players.get(playerId);
-    if (playerMesh) {
-        scene.remove(playerMesh);
+    const playerGroup = players.get(playerId);
+    if (playerGroup) {
+        scene.remove(playerGroup);
         players.delete(playerId);
     }
 }
 
 function updatePlayerPosition(data) {
-    const playerMesh = players.get(data.id);
-    if (playerMesh) {
-        playerMesh.position.set(data.x, data.y, data.z);
-        playerMesh.rotation.y = data.rotationY;
+    const playerGroup = players.get(data.id);
+    if (playerGroup) {
+        playerGroup.position.set(data.x, data.y - 0.9, data.z); // Adjust for ground level
+        playerGroup.rotation.y = data.rotationY;
+        
+        // Make name tag always face the camera
+        const nameTag = playerGroup.children[playerGroup.children.length - 1];
+        if (nameTag && nameTag.material.map) {
+            nameTag.lookAt(camera.position);
+        }
     }
 }
 
